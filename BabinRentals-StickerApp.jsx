@@ -27,6 +27,14 @@ import { DesignerView } from "./src/components/designer/DesignerView.jsx";
 import { PrintView } from "./src/components/print/PrintView.jsx";
 import { SettingsModal } from "./src/components/common/SettingsModal.jsx";
 import { QuickSearchModal } from "./src/components/common/QuickSearchModal.jsx";
+import { StickerRender } from "./src/components/sticker/StickerRender.jsx";
+import {
+  expandSequencedLabels,
+  buildPrintDocumentHtml,
+  executePrintHtml,
+  getPaperDimensions,
+} from "./src/utils/printUtils.js";
+import { mergeBackupData } from "./src/utils/backupUtils.js";
 
 function useViewportWidth() {
   const [width, setWidth] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1280));
@@ -59,6 +67,10 @@ export default function App() {
   // Modals
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+
+  // Direct Print Staging Job
+  const [directPrintJob, setDirectPrintJob] = useState(null);
+  const directPrintRef = useRef(null);
 
   // Toast Helper
   const showToast = useCallback((message, type = "success") => {
@@ -228,41 +240,68 @@ export default function App() {
     [settings, showToast]
   );
 
-  // Instant Single Print Handler (direct label print)
-  const handleDirectPrintItem = (item, templateId, qty, sequenceConfig, options) => {
-    const tpl = TEMPLATES[resolveTemplateId(templateId)];
-    const printWin = window.open("", "_blank", "width=800,height=600");
-    if (!printWin) {
-      alert("Please allow pop-ups to print stickers.");
-      return;
-    }
+  // Instant Single Print Handler (direct label print - independent from print queue)
+  const handleDirectPrintItem = useCallback(
+    (item, templateId, qty, sequenceConfig, options) => {
+      const labels = expandSequencedLabels({
+        item,
+        templateId,
+        qty,
+        sequenceConfig,
+        options,
+      });
 
-    const html = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Print Label - ${item.name}</title>
-    <style>
-      @page { size: auto; margin: 0mm; }
-      body { margin: 0; padding: 0; background: #FFFFFF; display: flex; flex-direction: column; align-items: center; justify-content: center; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-      .label-item { page-break-after: always; break-after: page; margin: 0; padding: 0; display: flex; align-items: center; justify-content: center; }
-    </style>
-  </head>
-  <body>
-    <div id="print-mount"></div>
-    <script>
-      window.onload = () => { setTimeout(() => window.print(), 250); };
-    </script>
-  </body>
-</html>`;
+      if (!labels.length) {
+        showToast("No stickers to print", "error");
+        return;
+      }
 
-    printWin.document.open();
-    printWin.document.write(html);
-    printWin.document.close();
+      setDirectPrintJob({
+        labels,
+        templateId,
+        options,
+        paperSize: settings.paperSize || "Roll",
+      });
+    },
+    [settings, showToast]
+  );
 
-    // Add to queue as well for records
-    handleAddToQueue(item, templateId, qty, sequenceConfig, options);
-  };
+  // Process direct print staging job once DOM and SVGs are mounted
+  useEffect(() => {
+    if (!directPrintJob || !directPrintRef.current) return;
+
+    const timer = setTimeout(async () => {
+      if (!directPrintRef.current) return;
+      const contentHtml = directPrintRef.current.innerHTML;
+      const paperSize = directPrintJob.paperSize || "Roll";
+      const paperDims = getPaperDimensions(paperSize);
+
+      const html = buildPrintDocumentHtml({
+        contentHtml,
+        paperSize,
+        paperDims,
+        sheetMargin: 0,
+        title: `Direct Print - ${directPrintJob.labels[0]?.item?.name || "Sticker"} (${directPrintJob.labels.length} Label${directPrintJob.labels.length > 1 ? "s" : ""})`,
+        brandName: settings?.brand || "Babin Rentals",
+        autoClose: true,
+      });
+
+      const res = await executePrintHtml(
+        html,
+        `Direct Print - ${directPrintJob.labels[0]?.item?.name || "Sticker"}`
+      );
+
+      if (!res.ok) {
+        showToast(res.error || "Failed to open print dialog", "error");
+      } else {
+        showToast(`Sent ${directPrintJob.labels.length} sticker(s) to printer`);
+      }
+
+      setDirectPrintJob(null);
+    }, 80);
+
+    return () => clearTimeout(timer);
+  }, [directPrintJob, settings, showToast]);
 
   // Open item in Designer
   const handleOpenDesigner = (item, template) => {
@@ -496,10 +535,24 @@ export default function App() {
         onSaveSettings={setSettings}
         allItems={items}
         allQueue={queue}
-        onRestoreBackup={(backup) => {
-          if (backup.settings) setSettings(backup.settings);
-          if (Array.isArray(backup.items)) setItems(backup.items);
-          if (Array.isArray(backup.queue)) setQueue(backup.queue);
+        onRestoreBackup={(backup, mode = "replace") => {
+          if (mode === "merge") {
+            const merged = mergeBackupData({
+              currentItems: items,
+              currentQueue: queue,
+              currentSettings: settings,
+              backupData: backup,
+            });
+            setSettings(merged.settings);
+            setItems(merged.items);
+            setQueue(merged.queue);
+            showToast(`Merged ${backup.items?.length || 0} item(s) from backup`);
+          } else {
+            if (backup.settings) setSettings(backup.settings);
+            if (Array.isArray(backup.items)) setItems(backup.items);
+            if (Array.isArray(backup.queue)) setQueue(backup.queue);
+            showToast(`Restored ${backup.items?.length || 0} item(s) from backup`);
+          }
         }}
       />
 
@@ -527,6 +580,37 @@ export default function App() {
         >
           {toast.type === "error" ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
           <span>{toast.message}</span>
+        </div>
+      )}
+
+      {/* Offscreen Staging Container for Direct / Instant Printing */}
+      {directPrintJob && (
+        <div
+          style={{
+            position: "fixed",
+            left: -99999,
+            top: -99999,
+            pointerEvents: "none",
+            opacity: 0,
+          }}
+        >
+          <div ref={directPrintRef}>
+            {directPrintJob.labels.map((entry) => (
+              <div key={entry._uniqueKey} className="roll-label">
+                <StickerRender
+                  templateId={entry.templateId}
+                  item={entry.item}
+                  scale={3.7795}
+                  theme={entry.options?.theme || settings.defaultTheme || "dark"}
+                  codeType={entry.options?.codeType || settings.defaultCodeType || "qr"}
+                  logoPlacement={entry.options?.logoPlacement || settings.logoPlacement || "left"}
+                  fontScale={entry.options?.fontScale || settings.fontScale || "standard"}
+                  showCutMarks={settings?.showCutMarks || false}
+                  settings={settings}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

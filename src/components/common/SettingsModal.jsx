@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useState, useRef } from "react";
 import {
   Sliders,
   X,
@@ -6,11 +6,19 @@ import {
   RotateCcw,
   Download,
   FileUp,
-  Image as ImageIcon,
+  AlertTriangle,
+  CheckCircle2,
+  Undo2,
+  ShieldAlert,
 } from "lucide-react";
 import { C, DEFAULT_SETTINGS } from "../../config/tokens.js";
 import { DEFAULT_LOGO_WHITE } from "../../config/defaultLogo.js";
 import { exportBackupJson } from "../../utils/exportUtils.js";
+import {
+  validateBackupPayload,
+  createPreRestoreSnapshot,
+  getPreRestoreSnapshot,
+} from "../../utils/backupUtils.js";
 
 export function SettingsModal({
   isOpen,
@@ -23,6 +31,12 @@ export function SettingsModal({
 }) {
   const fileInputRef = useRef(null);
   const backupInputRef = useRef(null);
+
+  const [restoreCandidate, setRestoreCandidate] = useState(null); // { data, summary, errors }
+  const [snapshotTimestamp, setSnapshotTimestamp] = useState(() => {
+    const s = getPreRestoreSnapshot();
+    return s?.snapshotTimestamp || null;
+  });
 
   if (!isOpen) return null;
 
@@ -50,25 +64,76 @@ export function SettingsModal({
       items: allItems,
       queue: allQueue,
     };
-    exportBackupJson(backupPayload, `babin-rentals-backup-${new Date().toISOString().slice(0, 10)}.json`);
+    exportBackupJson(
+      backupPayload,
+      `babin-rentals-backup-${new Date().toISOString().slice(0, 10)}.json`
+    );
   };
 
-  const handleBackupImport = (e) => {
+  const handleBackupFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result);
-        if (parsed && typeof parsed === "object") {
-          onRestoreBackup(parsed);
-          alert("Backup restored successfully!");
+        const validation = validateBackupPayload(parsed, file.size);
+        if (!validation.isValid) {
+          setRestoreCandidate({
+            data: null,
+            errors: validation.errors,
+            summary: null,
+          });
+        } else {
+          setRestoreCandidate({
+            data: parsed,
+            errors: [],
+            summary: validation.summary,
+          });
         }
       } catch (err) {
-        alert("Failed to read backup JSON file: " + err.message);
+        setRestoreCandidate({
+          data: null,
+          errors: [`Failed to parse JSON file: ${err.message}`],
+          summary: null,
+        });
       }
+      // Reset input value so same file can be re-selected if desired
+      if (backupInputRef.current) backupInputRef.current.value = "";
     };
     reader.readAsText(file);
+  };
+
+  const handleExecuteRestore = (mode) => {
+    if (!restoreCandidate?.data) return;
+
+    // 1. Create safety snapshot before altering live state
+    const snapResult = createPreRestoreSnapshot({
+      items: allItems,
+      queue: allQueue,
+      settings: currentSettings,
+    });
+
+    if (snapResult.ok) {
+      setSnapshotTimestamp(snapResult.timestamp);
+    }
+
+    // 2. Perform restore
+    onRestoreBackup(restoreCandidate.data, mode);
+    setRestoreCandidate(null);
+  };
+
+  const handleRollbackSnapshot = () => {
+    const snapshot = getPreRestoreSnapshot();
+    if (!snapshot) {
+      alert("No pre-restore snapshot found.");
+      return;
+    }
+    if (window.confirm(`Roll back to snapshot from ${new Date(snapshot.snapshotTimestamp).toLocaleString()}?`)) {
+      onRestoreBackup(snapshot, "replace");
+      alert("Rolled back to previous snapshot successfully.");
+    }
   };
 
   const inputStyle = {
@@ -111,7 +176,7 @@ export function SettingsModal({
       <div
         style={{
           width: "100%",
-          maxWidth: 620,
+          maxWidth: 640,
           maxHeight: "90vh",
           backgroundColor: "#111111",
           border: `1px solid ${C.border}`,
@@ -405,9 +470,9 @@ export function SettingsModal({
           {/* Section 4: Data Management & Backup */}
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: C.red, marginBottom: 12, textTransform: "uppercase" }}>
-              4. Backup & Inventory Sync
+              4. Backup, Restore & Rollback
             </div>
-            <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
               <button
                 onClick={handleBackupExport}
                 style={{
@@ -427,6 +492,7 @@ export function SettingsModal({
                 <Download size={14} />
                 Export Full Backup (.json)
               </button>
+
               <button
                 onClick={() => backupInputRef.current?.click()}
                 style={{
@@ -444,44 +510,148 @@ export function SettingsModal({
                 }}
               >
                 <FileUp size={14} />
-                Restore Backup (.json)
+                Import Backup (.json)
               </button>
+
+              {snapshotTimestamp && (
+                <button
+                  onClick={handleRollbackSnapshot}
+                  style={{
+                    padding: "8px 12px",
+                    background: "#241818",
+                    border: `1px solid ${C.redDim}`,
+                    borderRadius: 6,
+                    color: C.white,
+                    fontSize: 11,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                  }}
+                  title="Roll back to previous pre-restore snapshot"
+                >
+                  <Undo2 size={13} color={C.red} />
+                  <span>Undo Last Restore</span>
+                </button>
+              )}
+
               <input
                 ref={backupInputRef}
                 type="file"
                 accept=".json"
                 style={{ display: "none" }}
-                onChange={handleBackupImport}
+                onChange={handleBackupFileSelect}
               />
             </div>
-          </div>
-        </div>
 
-        {/* Footer */}
-        <div
-          style={{
-            padding: "12px 20px",
-            borderTop: `1px solid ${C.border}`,
-            background: "#0D0D0D",
-            display: "flex",
-            justifyContent: "flex-end",
-          }}
-        >
-          <button
-            onClick={onClose}
-            style={{
-              padding: "8px 20px",
-              background: C.red,
-              border: "none",
-              borderRadius: 6,
-              color: C.white,
-              fontWeight: 700,
-              fontSize: 13,
-              cursor: "pointer",
-            }}
-          >
-            Done & Save
-          </button>
+            {/* Validation / Restore Confirmation Box */}
+            {restoreCandidate && (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: 16,
+                  background: restoreCandidate.errors.length ? "#2D1517" : "#14202C",
+                  border: `1px solid ${restoreCandidate.errors.length ? C.red : C.blue}`,
+                  borderRadius: 8,
+                }}
+              >
+                {restoreCandidate.errors.length > 0 ? (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.red, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                      <ShieldAlert size={16} />
+                      <span>Backup Validation Failed</span>
+                    </div>
+                    <ul style={{ paddingLeft: 20, fontSize: 12, color: C.white, lineHeight: 1.5, margin: 0 }}>
+                      {restoreCandidate.errors.map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                    </ul>
+                    <button
+                      onClick={() => setRestoreCandidate(null)}
+                      style={{
+                        marginTop: 12,
+                        padding: "5px 12px",
+                        background: "#333",
+                        border: "none",
+                        color: C.white,
+                        borderRadius: 4,
+                        fontSize: 11,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, color: C.blue, fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                      <CheckCircle2 size={16} />
+                      <span>Valid Backup File ({restoreCandidate.summary.brand})</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: C.white, lineHeight: 1.6, marginBottom: 12 }}>
+                      <div>• Inventory Items: <strong>{restoreCandidate.summary.itemsCount}</strong></div>
+                      <div>• Queued Labels: <strong>{restoreCandidate.summary.queueCount}</strong></div>
+                      <div>• Backup Date: {restoreCandidate.summary.timestamp ? new Date(restoreCandidate.summary.timestamp).toLocaleString() : "Not specified"}</div>
+                      {restoreCandidate.summary.duplicateSkusCount > 0 && (
+                        <div style={{ color: "#E8A13A", marginTop: 4 }}>
+                          ⚠️ Backup contains {restoreCandidate.summary.duplicateSkusCount} duplicate SKU(s).
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.muted, marginBottom: 12 }}>
+                      A safety snapshot of your current data will be saved automatically before applying.
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        onClick={() => handleExecuteRestore("replace")}
+                        style={{
+                          padding: "6px 14px",
+                          background: C.red,
+                          border: "none",
+                          borderRadius: 5,
+                          color: C.white,
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Replace All Current Data
+                      </button>
+                      <button
+                        onClick={() => handleExecuteRestore("merge")}
+                        style={{
+                          padding: "6px 14px",
+                          background: "#2A3B4D",
+                          border: `1px solid ${C.blue}`,
+                          borderRadius: 5,
+                          color: C.white,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Safe Merge with Current Data
+                      </button>
+                      <button
+                        onClick={() => setRestoreCandidate(null)}
+                        style={{
+                          padding: "6px 12px",
+                          background: "none",
+                          border: `1px solid ${C.border}`,
+                          borderRadius: 5,
+                          color: C.muted,
+                          fontSize: 12,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

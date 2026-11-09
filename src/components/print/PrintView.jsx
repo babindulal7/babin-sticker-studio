@@ -18,6 +18,11 @@ import {
   makeSequencedSku,
 } from "../../config/tokens.js";
 import { StickerRender } from "../sticker/StickerRender.jsx";
+import {
+  buildPrintDocumentHtml,
+  executePrintHtml,
+  getPaperDimensions,
+} from "../../utils/printUtils.js";
 
 export function PrintView({
   queue,
@@ -194,82 +199,35 @@ export function PrintView({
   const currentPage = previewPages[activePageIdx];
 
   // Print function
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (stickerList.length === 0) {
       showToast("Print queue is empty. Add stickers from Designer or Library first.", "error");
       return;
     }
 
-    const printWin = window.open("", "_blank", "width=1200,height=900");
-    if (!printWin) {
-      alert("Please allow pop-ups in your browser to print stickers.");
+    if (!printRef.current) {
+      showToast("Print contents not ready yet, please wait a moment.", "error");
       return;
     }
 
-    const isRoll = paperSize === "Roll";
-    const pageSizeCss = isRoll ? "size: auto; margin: 0mm;" : `size: ${paperDims.w}mm ${paperDims.h}mm; margin: 0mm;`;
+    const html = buildPrintDocumentHtml({
+      contentHtml: printRef.current.innerHTML,
+      paperSize,
+      paperDims,
+      sheetMargin,
+      title: `Print Stickers - ${settings?.brand || "Babin Rentals"} (${stickerList.length} Labels)`,
+      brandName: settings?.brand || "Babin Rentals",
+      autoClose: true,
+    });
 
-    const html = `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Print Stickers - ${settings?.brand || "Babin Rentals"}</title>
-    <style>
-      @page {
-        ${pageSizeCss}
-      }
-      * {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-      }
-      body {
-        margin: 0;
-        padding: 0;
-        background: #FFFFFF;
-        -webkit-print-color-adjust: exact !important;
-        print-color-adjust: exact !important;
-      }
-      .page-sheet {
-        position: relative;
-        width: ${paperDims.w}mm;
-        height: ${paperDims.h}mm;
-        page-break-after: always;
-        break-after: page;
-        overflow: hidden;
-        margin: 0 auto;
-        padding: ${sheetMargin}mm;
-      }
-      .roll-label {
-        page-break-after: always;
-        break-after: page;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0;
-        padding: 0;
-      }
-      @media screen {
-        body { background: #E5E7EB; padding: 20px; }
-        .page-sheet { background: #FFFFFF; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin-bottom: 20px; }
-      }
-    </style>
-  </head>
-  <body>
-    ${printRef.current ? printRef.current.innerHTML : ""}
-    <script>
-      window.onload = () => {
-        setTimeout(() => {
-          window.print();
-        }, 300);
-      };
-    </script>
-  </body>
-</html>`;
+    const res = await executePrintHtml(
+      html,
+      `Print Stickers - ${settings?.brand || "Babin Rentals"}`
+    );
 
-    printWin.document.open();
-    printWin.document.write(html);
-    printWin.document.close();
+    if (!res.ok) {
+      showToast(res.error || "Failed to launch print dialog", "error");
+    }
   };
 
   return (
