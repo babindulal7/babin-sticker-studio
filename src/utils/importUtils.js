@@ -91,6 +91,7 @@ export function analyzeImport({
   const preparedRows = [];
   const invalidRows = [];
   const duplicateRows = [];
+  const seenSkusInFile = new Set();
 
   let newCount = 0;
   let updateCount = 0;
@@ -129,16 +130,21 @@ export function analyzeImport({
       return;
     }
 
+    const isFirstOccurrence = !seenSkusInFile.has(normSku);
+    seenSkusInFile.add(normSku);
+
     const isDuplicateInFile = (skuCountsInFile.get(normSku) || 0) > 1;
     if (isDuplicateInFile) {
-      duplicateRows.push({ rowNum, sku: rawSku });
+      duplicateRows.push({ rowNum, sku: rawSku, isFirstOccurrence });
     }
 
     const existing = existingMap.get(normSku);
 
     if (!existing) {
       // BRAND NEW ITEM
-      newCount++;
+      if (isFirstOccurrence) {
+        newCount++;
+      }
       const newItem = {
         id: uid(),
         ...incoming,
@@ -147,8 +153,9 @@ export function analyzeImport({
         qr_url: incoming.qr_url || pattern.replace("{sku}", rawSku),
         isPrinted: false,
         _changeType: "new",
-        _selected: true,
+        _selected: isFirstOccurrence, // Default unselect subsequent duplicate rows
         _isDuplicateInFile: isDuplicateInFile,
+        _isSubsequentDuplicate: !isFirstOccurrence,
         _fieldChanges: {},
         _rowNum: rowNum,
       };
@@ -162,8 +169,9 @@ export function analyzeImport({
       const merged = {
         ...existing, // Keeps existing ID, isPrinted, and unmapped/custom attributes
         _changeType: "unchanged",
-        _selected: true,
+        _selected: isFirstOccurrence, // Default unselect subsequent duplicate rows
         _isDuplicateInFile: isDuplicateInFile,
+        _isSubsequentDuplicate: !isFirstOccurrence,
         _rowNum: rowNum,
         _fieldChanges: {},
       };
@@ -221,7 +229,10 @@ export function mergeImportedItems({ existingItems = [], preparedRows = [] }) {
 
   selected.forEach((item) => {
     const key = normalizeSku(item.sku);
-    if (key) selectedMap.set(key, item);
+    // Keep first selected occurrence to prevent unexpected 'last row wins' collision
+    if (key && !selectedMap.has(key)) {
+      selectedMap.set(key, item);
+    }
   });
 
   const result = [];

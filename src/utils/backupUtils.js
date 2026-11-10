@@ -97,6 +97,7 @@ export function validateBackupPayload(data, fileSizeBytes = 0) {
 /**
  * Creates an emergency pre-restore snapshot in local storage so any
  * accidental overwrite can be recovered.
+ * Supports both browser localStorage and Electron storage IPC.
  */
 export function createPreRestoreSnapshot({ items = [], queue = [], settings = {} }) {
   try {
@@ -106,14 +107,52 @@ export function createPreRestoreSnapshot({ items = [], queue = [], settings = {}
       queue,
       settings,
     };
+    const serialized = JSON.stringify(snapshot);
+
+    let saved = false;
     if (typeof window !== "undefined" && window.localStorage) {
-      window.localStorage.setItem(PRE_RESTORE_SNAPSHOT_KEY, JSON.stringify(snapshot));
+      window.localStorage.setItem(PRE_RESTORE_SNAPSHOT_KEY, serialized);
+      saved = true;
     }
+
+    if (typeof window !== "undefined" && window.storage?.set) {
+      try {
+        window.storage.set(PRE_RESTORE_SNAPSHOT_KEY, serialized);
+        saved = true;
+      } catch (_) {}
+    }
+
+    if (!saved) {
+      return { ok: false, error: "Storage environment not available for safety snapshot." };
+    }
+
     return { ok: true, timestamp: snapshot.snapshotTimestamp };
   } catch (err) {
     console.warn("Failed to create local pre-restore snapshot:", err);
-    return { ok: false, error: err.message };
+    return { ok: false, error: err.message || "Failed to write snapshot to storage." };
   }
+}
+
+/**
+ * Validates whether a restore operation can safely proceed.
+ * If mode is 'replace' and snapshot failed, blocks restore unless user downloaded a safety backup.
+ */
+export function canSafelyRestore({ mode, snapshotResult, hasDownloadedSafetyBackup = false }) {
+  if (mode === "merge") {
+    return { allowed: true };
+  }
+  if (snapshotResult?.ok) {
+    return { allowed: true };
+  }
+  if (hasDownloadedSafetyBackup) {
+    return { allowed: true };
+  }
+  return {
+    allowed: false,
+    reason:
+      snapshotResult?.error ||
+      "Safety snapshot could not be saved to local storage. 'Replace All' has been blocked to prevent unrecoverable data loss.",
+  };
 }
 
 /**

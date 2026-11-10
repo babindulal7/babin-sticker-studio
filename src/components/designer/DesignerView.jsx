@@ -18,6 +18,7 @@ import {
 } from "../../config/tokens.js";
 import { CategoryTypeBadge } from "../common/Icons.jsx";
 import { StickerRender } from "../sticker/StickerRender.jsx";
+import { reservePrintWindow } from "../../utils/printUtils.js";
 
 export function DesignerView({
   items = [],
@@ -73,7 +74,16 @@ export function DesignerView({
 
   const handleInstantPrint = () => {
     if (onDirectPrintItem) {
-      onDirectPrintItem(currentItem, templateId, qty, sequenceConfig, { theme, codeType, logoPlacement, fontScale });
+      // Synchronously reserve print window inside click gesture to prevent browser popup blocking
+      const reservedWindow = reservePrintWindow();
+      onDirectPrintItem(
+        currentItem,
+        templateId,
+        qty,
+        sequenceConfig,
+        { theme, codeType, logoPlacement, fontScale },
+        reservedWindow
+      );
     } else {
       handleQueueStickers();
     }

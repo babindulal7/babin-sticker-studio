@@ -4,6 +4,7 @@ import {
   createPreRestoreSnapshot,
   getPreRestoreSnapshot,
   mergeBackupData,
+  canSafelyRestore,
 } from "../src/utils/backupUtils.js";
 
 describe("backupUtils", () => {
@@ -122,6 +123,58 @@ describe("backupUtils", () => {
       expect(recovered.items).toHaveLength(1);
       expect(recovered.items[0].sku).toBe("LENS-01");
       expect(recovered.settings.brand).toBe("Original Brand");
+    });
+
+    it("handles storage write errors gracefully when quota is exceeded", () => {
+      global.window.localStorage.setItem = () => {
+        throw new Error("QuotaExceededError: storage is full");
+      };
+
+      const snapRes = createPreRestoreSnapshot({ items: [] });
+      expect(snapRes.ok).toBe(false);
+      expect(snapRes.error).toContain("QuotaExceededError");
+    });
+  });
+
+  describe("canSafelyRestore", () => {
+    it("blocks replace restore when safety snapshot creation failed", () => {
+      const check = canSafelyRestore({
+        mode: "replace",
+        snapshotResult: { ok: false, error: "Quota exceeded" },
+        hasDownloadedSafetyBackup: false,
+      });
+
+      expect(check.allowed).toBe(false);
+      expect(check.reason).toContain("Quota exceeded");
+    });
+
+    it("allows replace restore when safety snapshot succeeds", () => {
+      const check = canSafelyRestore({
+        mode: "replace",
+        snapshotResult: { ok: true, timestamp: "2026-11-10T00:00:00Z" },
+        hasDownloadedSafetyBackup: false,
+      });
+
+      expect(check.allowed).toBe(true);
+    });
+
+    it("allows replace restore when user manually downloaded a safety backup first", () => {
+      const check = canSafelyRestore({
+        mode: "replace",
+        snapshotResult: { ok: false, error: "Storage full" },
+        hasDownloadedSafetyBackup: true,
+      });
+
+      expect(check.allowed).toBe(true);
+    });
+
+    it("allows merge restore even if snapshot creation failed because merge is non-destructive", () => {
+      const check = canSafelyRestore({
+        mode: "merge",
+        snapshotResult: { ok: false, error: "Storage full" },
+      });
+
+      expect(check.allowed).toBe(true);
     });
   });
 
