@@ -121,6 +121,10 @@ export function buildPrintDocumentHtml({
         margin: 0 auto;
         padding: ${sheetMargin}mm;
       }
+      .page-sheet:last-child {
+        page-break-after: auto;
+        break-after: auto;
+      }
       .roll-label {
         page-break-after: always;
         break-after: page;
@@ -131,6 +135,10 @@ export function buildPrintDocumentHtml({
         padding: 0;
         width: 100%;
         min-height: 100%;
+      }
+      .roll-label:last-child {
+        page-break-after: auto;
+        break-after: auto;
       }
       @media screen {
         body { background: #E5E7EB; padding: 20px; }

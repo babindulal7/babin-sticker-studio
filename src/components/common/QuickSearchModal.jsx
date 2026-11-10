@@ -97,9 +97,12 @@ export function QuickSearchModal({
             }}
             onKeyDown={(e) => {
               if (e.key === "Escape") onClose();
-              if (e.key === "Enter" && exactSkuMatch) {
-                onAddToQueue(exactSkuMatch, suggestTemplate(exactSkuMatch.category, exactSkuMatch.name), 1);
-                onClose();
+              if (e.key === "Enter") {
+                const target = exactSkuMatch || (matchedItems.length === 1 ? matchedItems[0] : null);
+                if (target) {
+                  onAddToQueue(target, suggestTemplate(target.category, target.name), 1);
+                  onClose();
+                }
               }
             }}
           />

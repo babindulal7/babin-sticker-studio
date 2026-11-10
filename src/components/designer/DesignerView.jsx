@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   Search,
   ZoomIn,
@@ -55,10 +55,25 @@ export function DesignerView({
   const seed = parseSkuSeed(currentItem.sku);
   const [sequenceConfig, setSequenceConfig] = useState({
     enabled: true,
-    prefix: seed?.prefix ?? "SKU-",
+    prefix: seed?.prefix ?? (currentItem.sku ? `${currentItem.sku}-` : "SKU-"),
     start: seed?.start ?? 1,
     pad: seed?.pad ?? 2,
   });
+
+  // Synchronize sequence config when currentItem changes
+  const prevSkuRef = useRef(currentItem.sku);
+  useEffect(() => {
+    if (prevSkuRef.current !== currentItem.sku) {
+      prevSkuRef.current = currentItem.sku;
+      const newSeed = parseSkuSeed(currentItem.sku);
+      setSequenceConfig({
+        enabled: true,
+        prefix: newSeed?.prefix ?? (currentItem.sku ? `${currentItem.sku}-` : "SKU-"),
+        start: newSeed?.start ?? 1,
+        pad: newSeed?.pad ?? 2,
+      });
+    }
+  }, [currentItem.sku]);
 
   const filteredItems = items.filter((i) => {
     const q = search.trim().toLowerCase();

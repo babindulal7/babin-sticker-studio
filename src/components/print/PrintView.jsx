@@ -710,8 +710,16 @@ export function PrintView({
         </div>
       )}
 
-      {/* Hidden Container Rendered for Printing Window Extraction */}
-      <div style={{ display: "none" }}>
+      {/* Offscreen Staging Container Rendered for Printing Extraction */}
+      <div
+        style={{
+          position: "fixed",
+          left: -99999,
+          top: -99999,
+          pointerEvents: "none",
+          opacity: 0,
+        }}
+      >
         <div ref={printRef}>
           {previewPages.map((page, pIdx) => {
             if (paperSize === "Roll") {

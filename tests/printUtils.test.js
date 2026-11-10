@@ -117,6 +117,8 @@ describe("printUtils - Label Sequence Expansion & Document Generation", () => {
     expect(docHtml).toContain("@page { size: 70mm 30mm; margin: 0mm; }");
     expect(docHtml).toContain("-webkit-print-color-adjust: exact !important");
     expect(docHtml).toContain(contentHtml);
+    expect(docHtml).toContain(".page-sheet:last-child");
+    expect(docHtml).toContain(".roll-label:last-child");
     expect(docHtml).toContain("document.fonts.ready");
     expect(docHtml).toContain("window.print()");
   });

@@ -36,21 +36,44 @@ export function ImportView({
         header: true,
         skipEmptyLines: true,
         complete: (r) => {
-          setRawData(r.data);
+          if (!r.data || r.data.length === 0) {
+            showToast("CSV file contains no data rows.", "error");
+            return;
+          }
           const hdrs = r.meta.fields || [];
+          if (hdrs.length === 0) {
+            showToast("CSV file contains no valid column headers.", "error");
+            return;
+          }
+          setRawData(r.data);
           setHeaders(hdrs);
           setMapping(autoMapHeaders(hdrs));
           setStep("map");
+        },
+        error: (err) => {
+          showToast("Failed to parse CSV file: " + err.message, "error");
         },
       });
     } else if (ext === "xlsx" || ext === "xls") {
       const reader = new FileReader();
       reader.onload = (e) => {
         try {
-          const wb = XLSX.read(e.target.result, { type: "binary" });
+          const wb = XLSX.read(e.target.result, { type: "array" });
+          if (!wb.SheetNames || wb.SheetNames.length === 0) {
+            showToast("Excel workbook has no sheets.", "error");
+            return;
+          }
           const ws = wb.Sheets[wb.SheetNames[0]];
           const data = XLSX.utils.sheet_to_json(ws);
-          const hdrs = data.length ? Object.keys(data[0]) : [];
+          if (!data || data.length === 0) {
+            showToast("Excel sheet contains no data rows.", "error");
+            return;
+          }
+          const hdrs = Object.keys(data[0] || {});
+          if (hdrs.length === 0) {
+            showToast("Excel sheet contains no valid column headers.", "error");
+            return;
+          }
           setRawData(data);
           setHeaders(hdrs);
           setMapping(autoMapHeaders(hdrs));
@@ -59,7 +82,7 @@ export function ImportView({
           showToast("Failed to parse Excel file: " + err.message, "error");
         }
       };
-      reader.readAsBinaryString(file);
+      reader.readAsArrayBuffer(file);
     } else {
       showToast("Unsupported file type. Use CSV or Excel (.xlsx, .xls).", "error");
     }
