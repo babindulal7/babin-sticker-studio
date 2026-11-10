@@ -18,6 +18,7 @@ import {
   validateBackupPayload,
   createPreRestoreSnapshot,
   getPreRestoreSnapshot,
+  canSafelyRestore,
 } from "../../utils/backupUtils.js";
 
 export function SettingsModal({
@@ -33,6 +34,8 @@ export function SettingsModal({
   const backupInputRef = useRef(null);
 
   const [restoreCandidate, setRestoreCandidate] = useState(null); // { data, summary, errors }
+  const [snapshotError, setSnapshotError] = useState(null);
+  const [hasSafetyBackupDownloaded, setHasSafetyBackupDownloaded] = useState(false);
   const [snapshotTimestamp, setSnapshotTimestamp] = useState(() => {
     const s = getPreRestoreSnapshot();
     return s?.snapshotTimestamp || null;
@@ -117,11 +120,28 @@ export function SettingsModal({
 
     if (snapResult.ok) {
       setSnapshotTimestamp(snapResult.timestamp);
+      setSnapshotError(null);
+    } else {
+      // If snapshot creation failed and mode is "replace"
+      const safetyCheck = canSafelyRestore({
+        mode,
+        snapshotResult: snapResult,
+        hasDownloadedSafetyBackup: hasSafetyBackupDownloaded,
+      });
+
+      if (!safetyCheck.allowed) {
+        setSnapshotError(
+          snapResult.error || "Could not write emergency safety snapshot to local storage."
+        );
+        return; // BLOCK Replace Restore!
+      }
     }
 
     // 2. Perform restore
     onRestoreBackup(restoreCandidate.data, mode);
     setRestoreCandidate(null);
+    setSnapshotError(null);
+    setHasSafetyBackupDownloaded(false);
   };
 
   const handleRollbackSnapshot = () => {
@@ -633,7 +653,10 @@ export function SettingsModal({
                         Safe Merge with Current Data
                       </button>
                       <button
-                        onClick={() => setRestoreCandidate(null)}
+                        onClick={() => {
+                          setRestoreCandidate(null);
+                          setSnapshotError(null);
+                        }}
                         style={{
                           padding: "6px 12px",
                           background: "none",
@@ -647,6 +670,67 @@ export function SettingsModal({
                         Cancel
                       </button>
                     </div>
+
+                    {snapshotError && (
+                      <div
+                        style={{
+                          marginTop: 14,
+                          padding: 12,
+                          background: "#2D1517",
+                          border: `1px solid ${C.red}`,
+                          borderRadius: 6,
+                        }}
+                      >
+                        <div
+                          style={{
+                            color: C.red,
+                            fontWeight: 700,
+                            fontSize: 12,
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            marginBottom: 6,
+                          }}
+                        >
+                          <ShieldAlert size={15} />
+                          <span>Replace All Blocked: Safety Snapshot Failed</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: C.white, lineHeight: 1.5, marginBottom: 10 }}>
+                          {snapshotError}
+                          <br />
+                          To protect against permanent data loss, please download a safety backup before replacing.
+                        </div>
+                        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                          <button
+                            onClick={() => {
+                              handleBackupExport();
+                              setHasSafetyBackupDownloaded(true);
+                            }}
+                            style={{
+                              padding: "6px 12px",
+                              background: C.blue,
+                              border: "none",
+                              borderRadius: 4,
+                              color: C.white,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 5,
+                            }}
+                          >
+                            <Download size={13} />
+                            <span>Download Safety Backup First</span>
+                          </button>
+                          {hasSafetyBackupDownloaded && (
+                            <span style={{ color: C.green, fontSize: 11, fontWeight: 600 }}>
+                              ✓ Safety backup saved. You can now proceed with Replace All.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

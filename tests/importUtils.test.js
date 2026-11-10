@@ -179,6 +179,18 @@ describe("importUtils - Inventory Reimport Integrity & Idempotence", () => {
 
     expect(analysis.summary.duplicateInFileCount).toBe(2);
     expect(analysis.duplicateRows).toHaveLength(2);
+    // First occurrence is selected; subsequent duplicate row is unselected by default
+    expect(analysis.preparedRows[0]._selected).toBe(true);
+    expect(analysis.preparedRows[1]._selected).toBe(false);
+    expect(analysis.preparedRows[1]._isSubsequentDuplicate).toBe(true);
+
+    // Merge preserves first occurrence
+    const merged = mergeImportedItems({
+      existingItems: [],
+      preparedRows: analysis.preparedRows,
+    });
+    expect(merged).toHaveLength(2);
+    expect(merged.find((i) => i.sku === "DUPLICATE-SKU-01").name).toBe("Camera Unit 1");
   });
 
   it("flags rows missing required fields as invalid", () => {

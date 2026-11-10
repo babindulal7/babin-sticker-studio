@@ -98,11 +98,23 @@ ipcMain.handle("storage:set", async (_event, key, value) => {
 });
 
 // Native Desktop Printing IPC Handler
-ipcMain.handle("print:html", async (_event, { html, title = "Print Stickers", silent = false }) => {
+ipcMain.handle("print:html", async (_event, payload) => {
+  if (!payload || typeof payload !== "object") {
+    return { ok: false, error: "Invalid print payload: expected object" };
+  }
+  const { html, title = "Print Stickers" } = payload;
+  if (typeof html !== "string" || !html.trim()) {
+    return { ok: false, error: "Invalid print payload: HTML content required" };
+  }
+  if (html.length > 10 * 1024 * 1024) {
+    return { ok: false, error: "Print payload exceeds maximum size limit (10MB)" };
+  }
+
   let printWin = null;
   try {
     printWin = new BrowserWindow({
       show: false,
+      title: String(title),
       webPreferences: {
         contextIsolation: true,
         nodeIntegration: false,
@@ -113,10 +125,22 @@ ipcMain.handle("print:html", async (_event, { html, title = "Print Stickers", si
     const encoded = Buffer.from(html, "utf8").toString("base64");
     await printWin.loadURL(`data:text/html;charset=utf-8;base64,${encoded}`);
 
+    // Wait deterministically for document fonts and images to load
+    try {
+      await printWin.webContents.executeJavaScript(`
+        Promise.all([
+          document.fonts ? document.fonts.ready : Promise.resolve(),
+          Promise.all(Array.from(document.images).map(function(img) {
+            return img.complete ? Promise.resolve() : new Promise(function(r) { img.onload = img.onerror = r; });
+          }))
+        ])
+      `);
+    } catch (_) {}
+
     return new Promise((resolve) => {
       printWin.webContents.print(
         {
-          silent: Boolean(silent),
+          silent: false, // Never silently print without dialog unless explicitly configured
           printBackground: true,
           color: true,
         },

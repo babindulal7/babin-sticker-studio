@@ -22,6 +22,7 @@ import {
   buildPrintDocumentHtml,
   executePrintHtml,
   getPaperDimensions,
+  reservePrintWindow,
 } from "../../utils/printUtils.js";
 
 export function PrintView({
@@ -61,10 +62,8 @@ export function PrintView({
 
   // Paper Dimensions
   const paperDims = useMemo(() => {
-    if (paperSize === "Letter") return { w: 215.9, h: 279.4, name: "US Letter" };
-    if (paperSize === "Roll") return { w: 62, h: 100, name: "Thermal Roll (Single)" };
-    return { w: 210, h: 297, name: "A4 Sheet" };
-  }, [paperSize]);
+    return getPaperDimensions(paperSize, stickerList[0]?.templateId);
+  }, [paperSize, stickerList]);
 
   const printable = useMemo(() => {
     return {
@@ -210,6 +209,9 @@ export function PrintView({
       return;
     }
 
+    const reservedWin = reservePrintWindow();
+    const isElectron = Boolean(typeof window !== "undefined" && window.desktopPrint?.isElectron);
+
     const html = buildPrintDocumentHtml({
       contentHtml: printRef.current.innerHTML,
       paperSize,
@@ -218,15 +220,19 @@ export function PrintView({
       title: `Print Stickers - ${settings?.brand || "Babin Rentals"} (${stickerList.length} Labels)`,
       brandName: settings?.brand || "Babin Rentals",
       autoClose: true,
+      suppressWindowPrint: isElectron,
     });
 
     const res = await executePrintHtml(
       html,
-      `Print Stickers - ${settings?.brand || "Babin Rentals"}`
+      `Print Stickers - ${settings?.brand || "Babin Rentals"}`,
+      reservedWin
     );
 
     if (!res.ok) {
       showToast(res.error || "Failed to launch print dialog", "error");
+    } else if (res.cancelled) {
+      showToast("Print cancelled");
     }
   };
 

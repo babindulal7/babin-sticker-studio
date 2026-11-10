@@ -25,6 +25,7 @@ export function ImportView({
   const [mapping, setMapping] = useState({});
   const [analysis, setAnalysis] = useState(null);
   const [preview, setPreview] = useState([]);
+  const [acknowledgedDuplicates, setAcknowledgedDuplicates] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileRef = useRef(null);
 
@@ -377,21 +378,40 @@ export function ImportView({
             <div
               style={{
                 marginBottom: 16,
-                padding: "10px 14px",
+                padding: "12px 16px",
                 background: "#2A1D0B",
                 border: "1px solid #D4A338",
                 borderRadius: 8,
                 fontSize: 12,
                 color: "#F5C542",
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
               }}
             >
-              <AlertTriangle size={16} />
-              <span>
-                <strong>Warning:</strong> {analysis.summary.duplicateInFileCount} duplicate SKU occurrences detected within this file. The last occurrence in the file will take precedence upon merge.
-              </span>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                <AlertTriangle size={16} />
+                <span>Duplicate SKUs Detected ({analysis.summary.duplicateInFileCount} duplicate rows)</span>
+              </div>
+              <div style={{ marginTop: 6, color: C.white, lineHeight: 1.5, fontSize: 11 }}>
+                Multiple rows share the same SKU. To prevent accidental overwrites, only the first occurrence will be imported; subsequent duplicate rows are unselected by default.
+              </div>
+              <label
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 10,
+                  cursor: "pointer",
+                  color: "#F5C542",
+                  fontWeight: 600,
+                  fontSize: 12,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={acknowledgedDuplicates}
+                  onChange={(e) => setAcknowledgedDuplicates(e.target.checked)}
+                />
+                <span>I acknowledge duplicate SKUs exist and confirm the current row selections.</span>
+              </label>
             </div>
           )}
 
@@ -518,6 +538,8 @@ export function ImportView({
                       <td style={{ padding: "8px 14px", fontSize: 11, color: C.muted, maxWidth: 220 }}>
                         {isInvalid ? (
                           <span style={{ color: C.red }}>{r._error}</span>
+                        ) : r._isSubsequentDuplicate ? (
+                          <span style={{ color: "#E8A13A" }}>Duplicate in file (unselected)</span>
                         ) : isUpdate && r._fieldChanges ? (
                           <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                             {Object.entries(r._fieldChanges).map(([k, v]) => (
@@ -560,14 +582,25 @@ export function ImportView({
             </button>
             <button
               onClick={confirmImport}
-              disabled={preview.filter((r) => r._selected && r._changeType !== "invalid").length === 0}
+              disabled={
+                preview.filter((r) => r._selected && r._changeType !== "invalid").length === 0 ||
+                (analysis?.summary?.duplicateInFileCount > 0 && !acknowledgedDuplicates)
+              }
               style={{
-                background: C.red,
+                background:
+                  preview.filter((r) => r._selected && r._changeType !== "invalid").length === 0 ||
+                  (analysis?.summary?.duplicateInFileCount > 0 && !acknowledgedDuplicates)
+                    ? "#333"
+                    : C.red,
                 color: C.white,
                 border: "none",
                 padding: "8px 24px",
                 borderRadius: 6,
-                cursor: "pointer",
+                cursor:
+                  preview.filter((r) => r._selected && r._changeType !== "invalid").length === 0 ||
+                  (analysis?.summary?.duplicateInFileCount > 0 && !acknowledgedDuplicates)
+                    ? "not-allowed"
+                    : "pointer",
                 fontSize: 12,
                 fontWeight: 700,
                 display: "flex",

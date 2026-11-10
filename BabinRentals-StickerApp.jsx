@@ -71,6 +71,7 @@ export default function App() {
   // Direct Print Staging Job
   const [directPrintJob, setDirectPrintJob] = useState(null);
   const directPrintRef = useRef(null);
+  const isPrintingRef = useRef(false);
 
   // Toast Helper
   const showToast = useCallback((message, type = "success") => {
@@ -242,7 +243,17 @@ export default function App() {
 
   // Instant Single Print Handler (direct label print - independent from print queue)
   const handleDirectPrintItem = useCallback(
-    (item, templateId, qty, sequenceConfig, options) => {
+    (item, templateId, qty, sequenceConfig, options, reservedWindow = null) => {
+      if (isPrintingRef.current) {
+        if (reservedWindow && !reservedWindow.closed) {
+          try {
+            reservedWindow.close();
+          } catch (_) {}
+        }
+        showToast("A print job is already being prepared, please wait...", "error");
+        return;
+      }
+
       const labels = expandSequencedLabels({
         item,
         templateId,
@@ -252,15 +263,22 @@ export default function App() {
       });
 
       if (!labels.length) {
+        if (reservedWindow && !reservedWindow.closed) {
+          try {
+            reservedWindow.close();
+          } catch (_) {}
+        }
         showToast("No stickers to print", "error");
         return;
       }
 
+      isPrintingRef.current = true;
       setDirectPrintJob({
         labels,
         templateId,
         options,
         paperSize: settings.paperSize || "Roll",
+        reservedWindow,
       });
     },
     [settings, showToast]
@@ -271,33 +289,43 @@ export default function App() {
     if (!directPrintJob || !directPrintRef.current) return;
 
     const timer = setTimeout(async () => {
-      if (!directPrintRef.current) return;
-      const contentHtml = directPrintRef.current.innerHTML;
-      const paperSize = directPrintJob.paperSize || "Roll";
-      const paperDims = getPaperDimensions(paperSize);
+      try {
+        if (!directPrintRef.current) return;
+        const contentHtml = directPrintRef.current.innerHTML;
+        const paperSize = directPrintJob.paperSize || "Roll";
+        const paperDims = getPaperDimensions(paperSize, directPrintJob.templateId);
+        const isElectron = Boolean(typeof window !== "undefined" && window.desktopPrint?.isElectron);
 
-      const html = buildPrintDocumentHtml({
-        contentHtml,
-        paperSize,
-        paperDims,
-        sheetMargin: 0,
-        title: `Direct Print - ${directPrintJob.labels[0]?.item?.name || "Sticker"} (${directPrintJob.labels.length} Label${directPrintJob.labels.length > 1 ? "s" : ""})`,
-        brandName: settings?.brand || "Babin Rentals",
-        autoClose: true,
-      });
+        const html = buildPrintDocumentHtml({
+          contentHtml,
+          paperSize,
+          paperDims,
+          sheetMargin: 0,
+          title: `Direct Print - ${directPrintJob.labels[0]?.item?.name || "Sticker"} (${directPrintJob.labels.length} Label${directPrintJob.labels.length > 1 ? "s" : ""})`,
+          brandName: settings?.brand || "Babin Rentals",
+          autoClose: true,
+          suppressWindowPrint: isElectron, // Prevent double print in Electron desktop app
+        });
 
-      const res = await executePrintHtml(
-        html,
-        `Direct Print - ${directPrintJob.labels[0]?.item?.name || "Sticker"}`
-      );
+        const res = await executePrintHtml(
+          html,
+          `Direct Print - ${directPrintJob.labels[0]?.item?.name || "Sticker"}`,
+          directPrintJob.reservedWindow
+        );
 
-      if (!res.ok) {
-        showToast(res.error || "Failed to open print dialog", "error");
-      } else {
-        showToast(`Sent ${directPrintJob.labels.length} sticker(s) to printer`);
+        if (!res.ok) {
+          showToast(res.error || "Failed to open print dialog", "error");
+        } else if (res.cancelled) {
+          showToast("Print cancelled");
+        } else {
+          showToast(`Sent ${directPrintJob.labels.length} sticker(s) to printer`);
+        }
+      } catch (err) {
+        showToast("Print error: " + (err.message || "Failed to print"), "error");
+      } finally {
+        isPrintingRef.current = false;
+        setDirectPrintJob(null);
       }
-
-      setDirectPrintJob(null);
     }, 80);
 
     return () => clearTimeout(timer);

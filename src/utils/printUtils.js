@@ -43,11 +43,25 @@ export function expandSequencedLabels({
 }
 
 /**
- * Returns physical paper dimensions in millimeters
+ * Returns physical paper dimensions in millimeters.
+ * When paperSize is "Roll" and a templateId is provided, matches the exact dimensions of that template.
  */
-export function getPaperDimensions(paperSize = "A4") {
+export function getPaperDimensions(paperSize = "A4", templateId = null) {
   if (paperSize === "Letter") return { w: 215.9, h: 279.4, name: "US Letter" };
-  if (paperSize === "Roll") return { w: 62, h: 100, name: "Thermal Roll (Single)" };
+  if (paperSize === "Roll") {
+    if (templateId) {
+      const resolved = resolveTemplateId(templateId);
+      const t = TEMPLATES[resolved];
+      if (t) {
+        return {
+          w: t.w,
+          h: t.h,
+          name: `Thermal Roll (${t.name} ${t.size})`,
+        };
+      }
+    }
+    return { w: 62, h: 100, name: "Thermal Roll (Standard 62x100mm)" };
+  }
   return { w: 210, h: 297, name: "A4 Sheet" };
 }
 
@@ -55,6 +69,9 @@ export function getPaperDimensions(paperSize = "A4") {
  * Builds the complete, safe HTML document for printing stickers.
  * Uses strict @page geometry, print-color-adjust, and a readiness script that
  * waits for fonts and images before invoking window.print().
+ *
+ * When suppressWindowPrint is true (e.g. in Electron native printing),
+ * omits the automatic window.print() script to avoid double-printing.
  */
 export function buildPrintDocumentHtml({
   contentHtml = "",
@@ -64,10 +81,11 @@ export function buildPrintDocumentHtml({
   title = "Print Stickers",
   brandName = "Babin Rentals",
   autoClose = true,
+  suppressWindowPrint = false,
 }) {
   const isRoll = paperSize === "Roll";
   const pageSizeCss = isRoll
-    ? "@page { size: auto; margin: 0mm; }"
+    ? `@page { size: ${paperDims.w}mm ${paperDims.h}mm; margin: 0mm; }`
     : `@page { size: ${paperDims.w}mm ${paperDims.h}mm; margin: 0mm; }`;
 
   const safeTitle = escapeHtml(title || `Print Stickers - ${brandName}`);
@@ -123,7 +141,10 @@ export function buildPrintDocumentHtml({
   </head>
   <body>
     ${contentHtml}
-    <script>
+    ${
+      suppressWindowPrint
+        ? ""
+        : `<script>
       (function() {
         var printed = false;
         async function runPrint() {
@@ -168,18 +189,53 @@ export function buildPrintDocumentHtml({
             : ""
         }
       })();
-    </script>
+    </script>`
+    }
   </body>
 </html>`;
 }
 
 /**
- * Dispatches HTML to print window (or Electron desktopPrint API if available).
- * Returns { ok: boolean, error?: string }.
+ * Synchronously reserves a print window directly in response to a user click gesture.
+ * This prevents browser popup-blockers (Chrome, Safari) from blocking the window
+ * when rendering takes more than 0ms.
+ * In Electron environments, returns null (Electron routes via native IPC).
  */
-export async function executePrintHtml(html, title = "Print Stickers") {
+export function reservePrintWindow() {
+  if (typeof window === "undefined" || !window.open) return null;
+  // If running in Electron with native print capability, don't open child window
+  if (window.desktopPrint?.isElectron) return null;
+
+  try {
+    const win = window.open("", "_blank", "width=1100,height=800,menubar=no,toolbar=no");
+    if (win) {
+      try {
+        win.document.title = "Preparing stickers for printing...";
+        win.document.body.innerHTML =
+          '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#555;font-size:14px;background:#FAFAFA;">' +
+          '<span>Preparing stickers for printing...</span>' +
+          '</div>';
+      } catch (_) {}
+    }
+    return win;
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * Dispatches HTML to print window (or Electron desktopPrint API if available).
+ * If a reservedWindow from a prior click gesture is provided, it writes to it directly.
+ * Returns { ok: boolean, error?: string, cancelled?: boolean }.
+ */
+export async function executePrintHtml(html, title = "Print Stickers", reservedWindow = null) {
   // If running in Electron with desktopPrint API
   if (typeof window !== "undefined" && window.desktopPrint?.printHtml) {
+    if (reservedWindow && !reservedWindow.closed) {
+      try {
+        reservedWindow.close();
+      } catch (_) {}
+    }
     try {
       const res = await window.desktopPrint.printHtml({ html, title });
       return res || { ok: true };
@@ -189,17 +245,20 @@ export async function executePrintHtml(html, title = "Print Stickers") {
     }
   }
 
-  // Web Browser / Electron window.open path
-  if (typeof window === "undefined" || !window.open) {
-    return { ok: false, error: "Window environment not available" };
-  }
+  // Use reserved window if available and still open
+  let printWin = reservedWindow && !reservedWindow.closed ? reservedWindow : null;
 
-  const printWin = window.open("", "_blank", "width=1100,height=800,menubar=no,toolbar=no");
   if (!printWin) {
-    return {
-      ok: false,
-      error: "Pop-up blocked. Please allow pop-ups for this site to print stickers.",
-    };
+    if (typeof window === "undefined" || !window.open) {
+      return { ok: false, error: "Window environment not available" };
+    }
+    printWin = window.open("", "_blank", "width=1100,height=800,menubar=no,toolbar=no");
+    if (!printWin) {
+      return {
+        ok: false,
+        error: "Pop-up blocked. Please allow pop-ups for this site to print stickers.",
+      };
+    }
   }
 
   try {
