@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   C,
   TEMPLATES,
@@ -6,9 +6,11 @@ import {
   resolveTemplateId,
   getEquipmentType,
   calculateSmartFontSizes,
+  calculateFitSkuFontSize,
 } from "../../config/tokens.js";
 import { getTypeIcon } from "../common/Icons.jsx";
 import { DEFAULT_LOGO_WHITE } from "../../config/defaultLogo.js";
+import { BabinLogo } from "../common/BabinLogo.jsx";
 import { QrCodeSvg } from "./QrCodeSvg.jsx";
 import { BarcodeSvg } from "./BarcodeSvg.jsx";
 
@@ -153,14 +155,27 @@ export function StickerRender({
     </>
   ) : null;
 
+  const [customLogoFailed, setCustomLogoFailed] = useState(false);
+
   // Smart Logo Renderer
   const renderLogoImg = (maxH, maxW = "100%", extraStyle = {}) => {
     if (resolvedLogoPlacement === "hidden") return null;
-    const isDefault = logoSrc === DEFAULT_LOGO_WHITE;
+    const hasCustom = Boolean(settings?.customLogo) && !customLogoFailed;
+    if (!hasCustom) {
+      return (
+        <BabinLogo
+          height={maxH}
+          width={maxW === "100%" ? "auto" : maxW}
+          theme={theme}
+          style={extraStyle}
+        />
+      );
+    }
     return (
       <img
-        src={logoSrc}
-        alt=""
+        src={settings.customLogo}
+        alt="Logo"
+        onError={() => setCustomLogoFailed(true)}
         style={{
           maxHeight: maxH,
           maxWidth: maxW,
@@ -169,7 +184,6 @@ export function StickerRender({
           objectFit: "contain",
           display: "block",
           flexShrink: 0,
-          filter: isLight && isDefault ? "brightness(0)" : "none",
           ...extraStyle,
         }}
       />
@@ -240,8 +254,10 @@ export function StickerRender({
   };
 
   // High-Contrast SKU Pill
-  const renderSkuPill = (fontSize, showIcon = true) => {
-    const iconSize = Math.max(8, Math.round(fontSize * 0.9));
+  const renderSkuPill = (fontSize, showIcon = true, isCompact = false) => {
+    const padH = isCompact ? 3.5 : 5.5;
+    const padV = isCompact ? 1 : 1.5;
+    const iconSize = Math.max(7, Math.round(fontSize * 0.88));
     const pillBg = isLight
       ? "rgba(0,0,0,0.04)"
       : isWarning
@@ -258,13 +274,14 @@ export function StickerRender({
         style={{
           display: "inline-flex",
           alignItems: "center",
-          gap: 5,
+          gap: isCompact ? 3 : 5,
           background: pillBg,
           border: `1px solid ${pillBorder}`,
-          borderRadius: 4,
-          padding: "1.5px 6px",
+          borderRadius: 3.5,
+          padding: `${padV}px ${padH}px`,
           maxWidth: "100%",
           minWidth: 0,
+          boxSizing: "border-box",
         }}
       >
         <span
@@ -274,7 +291,7 @@ export function StickerRender({
             fontWeight: 800,
             color: skuColor,
             lineHeight: 1.1,
-            letterSpacing: "0.02em",
+            letterSpacing: isCompact ? "-0.01em" : "0.01em",
             ...noOverflowText,
           }}
         >
@@ -294,18 +311,19 @@ export function StickerRender({
   // -------------------------------------------------------------
   if (resolvedId === "t1" || resolvedId === "t1l") {
     const isT1 = resolvedId === "t1";
-    const padX = isT1 ? 4 : 6;
-    const topPad = stripH + (isT1 ? 1.5 : 2.5);
+    const padX = isT1 ? 4 : 5;
+    const topPad = stripH + (isT1 ? 1.5 : 2);
     const bottomPad = isT1 ? 1.5 : 2.5;
-    const gap = isT1 ? 3 : 5;
+    const gap = isT1 ? 3 : 4;
     const contentH = Math.max(H - topPad - bottomPad, 1);
 
     const showCode = codeType !== "none" && !isT1;
-    const codeSize = showCode ? Math.min(contentH, 44) : 0;
+    // On 45x15mm, 34px QR code preserves high scannability while expanding text column
+    const codeSize = showCode ? Math.min(contentH * 0.74, 34) : 0;
 
     const hasLogo = resolvedLogoPlacement !== "hidden";
-    const logoMaxW = isT1 ? Math.min(22, W * 0.22) : Math.min(28, W * 0.24);
-    const logoMaxH = Math.min(contentH * 0.88, isT1 ? 16 : 24);
+    const logoMaxW = isT1 ? Math.min(20, W * 0.2) : Math.min(22, W * 0.18);
+    const logoMaxH = Math.min(contentH * 0.82, isT1 ? 14 : 20);
     const logoSlotW = hasLogo ? logoMaxW : 0;
 
     const textW = Math.max(
@@ -314,9 +332,22 @@ export function StickerRender({
     );
 
     const mult = resolvedFontScale === "large" ? 1.15 : resolvedFontScale === "compact" ? 0.88 : 1.0;
-    const nameFs = Math.max(isT1 ? 4.5 : 6, Math.min(isT1 ? 6.5 : 8.5, Math.round(contentH * 0.3 * mult)));
-    const skuFs = Math.max(isT1 ? 6.5 : 8, Math.min(isT1 ? 9.5 : 11, Math.round(contentH * 0.42 * mult)));
-    const propFs = Math.max(isT1 ? 3.5 : 4.5, Math.min(isT1 ? 5 : 6.5, Math.round(contentH * 0.22 * mult)));
+
+    // Dynamically calculate name font size based on text width and string length
+    const nameFitW = Math.floor(textW / Math.max(name.length * 0.52, 1));
+    const nameFs = Math.max(isT1 ? 4.5 : 6, Math.min(isT1 ? 6.5 : 8.5, Math.round(nameFitW * mult)));
+
+    // Fit SKU font size so it NEVER truncates with ellipsis
+    const skuFs = calculateFitSkuFontSize({
+      sku,
+      availableWidth: textW,
+      maxFs: isT1 ? 9.5 : 11,
+      minFs: isT1 ? 6.5 : 7.5,
+      showIcon: false,
+      compact: true,
+    });
+
+    const propFs = Math.max(isT1 ? 3.5 : 4.5, Math.min(isT1 ? 4.8 : 5.5, Math.round(contentH * 0.16 * mult)));
 
     return (
       <div style={baseStyle}>
@@ -327,12 +358,18 @@ export function StickerRender({
 
         <div
           style={{
+            width: "100%",
             height: "100%",
             display: "flex",
             alignItems: "center",
             gap,
-            padding: `${topPad}px ${padX}px ${bottomPad}px`,
+            paddingTop: `${topPad}px`,
+            paddingBottom: `${bottomPad}px`,
+            paddingLeft: `${padX}px`,
+            paddingRight: `${padX}px`,
+            boxSizing: "border-box",
             minWidth: 0,
+            overflow: "hidden",
           }}
         >
           {hasLogo && (
@@ -355,25 +392,27 @@ export function StickerRender({
               minWidth: 0,
               width: textW,
               flex: `1 1 ${textW}px`,
-              height: contentH,
+              height: "100%",
               display: "flex",
               flexDirection: "column",
               justifyContent: "space-between",
+              boxSizing: "border-box",
+              overflow: "hidden",
               gap: 1,
             }}
           >
-            <div style={{ ...noOverflowText, fontSize: nameFs, fontWeight: 700, color: textColor, lineHeight: 1 }}>
+            <div style={{ ...noOverflowText, fontSize: nameFs, fontWeight: 700, color: textColor, lineHeight: 1.15 }}>
               {name}
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-              {renderSkuPill(skuFs, false)}
+            <div style={{ display: "flex", alignItems: "center", gap: 3, minWidth: 0 }}>
+              {renderSkuPill(skuFs, false, true)}
               {isT1 && (
-                <span style={{ color: stripColor, display: "inline-flex", alignItems: "center" }}>
-                  {getTypeIcon(type, stripColor, Math.max(7, Math.round(skuFs * 0.9)), 2)}
+                <span style={{ color: stripColor, display: "inline-flex", alignItems: "center", flexShrink: 0 }}>
+                  {getTypeIcon(type, stripColor, Math.max(7, Math.round(skuFs * 0.88)), 2)}
                 </span>
               )}
             </div>
-            <div style={{ ...mono, ...noOverflowText, fontSize: propFs, fontWeight: 600, color: propColor, lineHeight: 1 }}>
+            <div style={{ ...mono, ...noOverflowText, fontSize: propFs, fontWeight: 600, color: propColor, lineHeight: 1.15, paddingBottom: 0.5 }}>
               {propertyText}
             </div>
           </div>
@@ -403,7 +442,14 @@ export function StickerRender({
 
     const mult = resolvedFontScale === "large" ? 1.15 : resolvedFontScale === "compact" ? 0.88 : 1.0;
     const nameFs = Math.max(6, Math.min(9, Math.round(contentH * 0.35 * mult)));
-    const skuFs = Math.max(7.5, Math.min(10.5, Math.round(contentH * 0.38 * mult)));
+    const skuFs = calculateFitSkuFontSize({
+      sku,
+      availableWidth: panelW * 0.55,
+      maxFs: 10.5,
+      minFs: 7,
+      showIcon: true,
+      compact: true,
+    });
     const propFs = Math.max(4.5, Math.min(6.5, Math.round(contentH * 0.22 * mult)));
 
     const renderPanelContent = (isPanelB = false) => {
@@ -550,6 +596,8 @@ export function StickerRender({
       availableHeight: bodyH,
       fontScale: resolvedFontScale,
       maxNameLines: isLarge ? 3 : 2,
+      showCategory: resolvedShowCategory,
+      compactPill: isSmall,
     });
 
     return (
@@ -638,7 +686,7 @@ export function StickerRender({
               </div>
 
               {/* Hero SKU Pill */}
-              <div>{renderSkuPill(typography.skuFs, !resolvedShowCategory)}</div>
+              <div>{renderSkuPill(typography.skuFs, !resolvedShowCategory, isSmall)}</div>
 
               {/* Bottom Ownership / Phone Row */}
               <div
@@ -702,6 +750,8 @@ export function StickerRender({
     availableHeight: totalContentH,
     fontScale: resolvedFontScale,
     maxNameLines: isLarge ? 3 : resolvedId === "t3" ? 3 : 2,
+    showCategory: resolvedShowCategory,
+    compactPill: isSmall,
   });
 
   return (
@@ -781,7 +831,7 @@ export function StickerRender({
           </div>
 
           {/* Hero SKU Pill */}
-          <div>{renderSkuPill(typography.skuFs, !resolvedShowCategory)}</div>
+          <div>{renderSkuPill(typography.skuFs, !resolvedShowCategory, isSmall)}</div>
 
           {/* Bottom Row: Property Text + Phone */}
           <div

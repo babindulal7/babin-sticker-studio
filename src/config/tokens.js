@@ -170,6 +170,24 @@ export function fitWrappedTextPx(text, maxWidth, maxLines, minSize, maxSize, avg
   return Math.max(minSize, Math.min(maxSize, lineFit));
 }
 
+export function calculateFitSkuFontSize({
+  sku = "",
+  availableWidth = 100,
+  maxFs = 11,
+  minFs = 6.5,
+  showIcon = false,
+  compact = false,
+}) {
+  const raw = String(sku || "").trim();
+  if (!raw) return minFs;
+  // Account for pill padding (compact: 2x3=6, standard: 2x5=10), border (2px), and icon (14px)
+  const pillOverhead = (compact ? 8 : 12) + (showIcon ? 14 : 0);
+  const availableTextW = Math.max(availableWidth - pillOverhead, 10);
+  // Monospace tabular glyphs are approx 0.60 * fontSize wide
+  const fitFs = Math.floor(availableTextW / Math.max(raw.length * 0.60, 1));
+  return Math.max(minFs, Math.min(maxFs, fitFs));
+}
+
 export function calculateSmartFontSizes({
   name = "",
   sku = "",
@@ -178,14 +196,21 @@ export function calculateSmartFontSizes({
   availableHeight = 50,
   fontScale = "standard", // "compact" | "standard" | "large"
   maxNameLines = 2,
+  showCategory = true,
+  compactPill = false,
 }) {
   const mult = fontScale === "large" ? 1.18 : fontScale === "compact" ? 0.88 : 1.0;
 
   // SKU font size: the primary operational identifier, bold & readable
+  // Account for pill padding and category icon overhead
+  const pillPadding = compactPill ? 8 : 12;
+  const iconExtra = !showCategory ? 14 : 0;
+  const skuNetWidth = Math.max(availableWidth - pillPadding - iconExtra, 16);
+
   const skuClean = String(sku || "").trim();
-  const skuFitW = Math.floor(availableWidth / Math.max(skuClean.length * 0.62, 1));
+  const skuFitW = Math.floor(skuNetWidth / Math.max(skuClean.length * 0.60, 1));
   const skuMax = Math.round(availableHeight * 0.32 * mult);
-  const skuFs = Math.max(7, Math.min(skuMax, Math.round(skuFitW * 0.95 * mult)));
+  const skuFs = Math.max(6.5, Math.min(skuMax, Math.round(skuFitW * 0.96 * mult)));
 
   // Property / Brand caption font size
   const propClean = String(propertyText || "").trim();
@@ -197,7 +222,7 @@ export function calculateSmartFontSizes({
   const nameClean = String(name || "").trim();
   const remainingH = Math.max(availableHeight - skuFs - propFs - 4, 10);
   const nameLineH = remainingH / maxNameLines;
-  const nameFitW = Math.floor((availableWidth * maxNameLines) / Math.max(nameClean.length * 0.56, 1));
+  const nameFitW = Math.floor((availableWidth * maxNameLines) / Math.max(nameClean.length * 0.54, 1));
   const nameMax = Math.round(nameLineH * 0.92 * mult);
   const nameFs = Math.max(6.5, Math.min(nameMax, Math.round(nameFitW * mult)));
 

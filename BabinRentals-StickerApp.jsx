@@ -20,6 +20,7 @@ import {
 } from "./src/config/tokens.js";
 import { storeLoad, storeSave } from "./src/utils/storage.js";
 import { DEFAULT_LOGO_WHITE } from "./src/config/defaultLogo.js";
+import { BabinLogo } from "./src/components/common/BabinLogo.jsx";
 
 import { ImportView } from "./src/components/import/ImportView.jsx";
 import { LibraryView } from "./src/components/library/LibraryView.jsx";
@@ -368,10 +369,21 @@ export default function App() {
             }}
             onClick={() => setPage("library")}
           >
-            <img
-              src={settings.customLogo || DEFAULT_LOGO_WHITE}
-              alt="Logo"
-              style={{ height: "100%", width: "auto", display: "block" }}
+            {settings?.customLogo ? (
+              <img
+                src={settings.customLogo}
+                alt="Logo"
+                onError={(e) => {
+                  e.currentTarget.style.display = "none";
+                  const next = e.currentTarget.nextElementSibling;
+                  if (next) next.style.display = "block";
+                }}
+                style={{ height: "100%", width: "auto", display: "block" }}
+              />
+            ) : null}
+            <BabinLogo
+              height={28}
+              style={{ display: settings?.customLogo ? "none" : "block" }}
             />
           </div>
           {!isPhone && (

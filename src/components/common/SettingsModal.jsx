@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { C, DEFAULT_SETTINGS } from "../../config/tokens.js";
 import { DEFAULT_LOGO_WHITE } from "../../config/defaultLogo.js";
+import { BabinLogo } from "./BabinLogo.jsx";
 import { exportBackupJson } from "../../utils/exportUtils.js";
 import {
   validateBackupPayload,
@@ -318,10 +319,21 @@ export function SettingsModal({
                   overflow: "hidden",
                 }}
               >
-                <img
-                  src={currentSettings.customLogo || DEFAULT_LOGO_WHITE}
-                  alt="Logo preview"
-                  style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }}
+                {currentSettings.customLogo ? (
+                  <img
+                    src={currentSettings.customLogo}
+                    alt="Logo preview"
+                    onError={(e) => {
+                      e.currentTarget.style.display = "none";
+                      const next = e.currentTarget.nextElementSibling;
+                      if (next) next.style.display = "block";
+                    }}
+                    style={{ maxHeight: "100%", maxWidth: "100%", objectFit: "contain" }}
+                  />
+                ) : null}
+                <BabinLogo
+                  height={32}
+                  style={{ display: currentSettings.customLogo ? "none" : "block" }}
                 />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
